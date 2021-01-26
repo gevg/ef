@@ -1,0 +1,409 @@
+package ef
+
+import (
+	"fmt"
+	"math/bits"
+	"testing"
+)
+
+// log2 computes log2(x) 'rounded' to the next integer, of a strictly positive integer x.
+func log2(y uint64, n uint64, l uint64) {
+	x := uint64(float64(y) / float64(n))
+	i := 0
+	for x > 0 {
+		x >>= 1
+		i++
+	}
+	z := 63 - bits.LeadingZeros64(y/n)
+	if z < 0 {
+		z = 0
+	}
+	fmt.Printf("l = %d, n = %d, u = %d, log(u) = %d, log(u/n) = %d, log(n) = %d, log(u)-log(n) = %d\n",
+		l, n, y, 63-bits.LeadingZeros64(y), z, 63-bits.LeadingZeros64(n), bits.LeadingZeros64(n)-bits.LeadingZeros64(y))
+}
+
+func TestNumLowerBits(t *testing.T) {
+	for _, tc := range []struct {
+		n int
+		u uint64
+		l int
+	}{
+		{5, 36, 2},
+		{6, 32, 2},
+		{7, 19, 2},
+		{8, 32, 2},
+		{12, 62, 2},
+	} {
+		if got := numLowBits(tc.u, tc.n); got != tc.l {
+			t.Errorf("numLowerBits(%d, %d) = %d != %d = want", tc.u, tc.n, got, tc.l)
+		}
+	}
+}
+
+func TestNumHigherBits(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		fmt.Printf("i: %d, n: %d\n", i, numHighBits(i))
+	}
+}
+
+func TestNew(t *testing.T) {
+	for _, tc := range []struct {
+		in  []uint64
+		out []uint64
+		l   int
+	}{
+		{ // (2017) Compressed Suffix Arrays to Self-Indexes based on Partitioned Elias-Fano
+			[]uint64{5, 8, 8, 15, 32},
+			// []uint64{0x52F90C}, // 0b 101 0010 1111 1001 0000 1100 reversed???
+			[]uint64{0x182FCA}, //    0b   1 1000 0010 1111 1100 1010
+			2,
+		},
+		{
+			[]uint64{5, 8, 9, 10, 14, 32},
+			[]uint64{0xA45F4A}, // 0b 1010 0100 0101 1111 0100 1010
+			2,
+		},
+		{
+			[]uint64{3, 4, 7, 13, 14, 15, 21, 25, 36, 38, 54, 62},
+			[]uint64{0x512B67A8C539A}, // 0b 0101 0001 0010 1011 0110 0111 1010 1000 1100 0101 0011 1001 1010
+			2,                         //                               0b 1001 0000 1100 0101 0011 1001 1010
+		},
+		{
+			[]uint64{2, 3, 5, 7, 11, 13, 24},
+			[]uint64{0x3EF22B6}, // 0b 0 0011 1110 1111 0010 0010 1011 0110
+			2,
+		},
+		{ // Steve_Thomas (er is geen laatste stopbit in de highbits)
+			[]uint64{4, 5, 6, 13, 22, 25},
+			[]uint64{0x3EF22B6}, // 0b 0 0011 1110 1111 0010 0010 1011 0110
+			2,
+		},
+		{ // (2016) Elias-Fano encoding
+			[]uint64{3, 4, 7, 13, 14, 15, 21, 43}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},             // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                     //
+		},
+		{ //
+			[]uint64{3, 4, 13, 15, 24, 26, 27, 29}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},              // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                      //
+		},
+		{ // sds-tutorial
+			[]uint64{8, 9, 11, 13, 16, 18, 23}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},          // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			2,                                  //
+		},
+		{ // Text Indexing
+			[]uint64{4, 13, 15, 24, 26, 27, 29}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},           // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                   //
+		},
+	} {
+		ef := New(tc.in)
+		t.Errorf("Bit array: %b\n", ef.b)
+	}
+}
+
+func TestAccess(t *testing.T) {
+	for i, tc := range []struct {
+		in  []uint64
+		out []uint64
+		l   int
+	}{
+		{ // (2017) Compressed Suffix Arrays to Self-Indexes based on Partitioned Elias-Fano
+			[]uint64{5, 8, 8, 15, 32},
+			// []uint64{0x52F90C}, // 0b 101 0010 1111 1001 0000 1100 reversed???
+			[]uint64{0x182FCA}, //    0b   1 1000 0010 1111 1100 1010
+			2,
+		},
+		{
+			[]uint64{5, 8, 9, 10, 14, 32},
+			[]uint64{0xA45F4A}, // 0b 1010 0100 0101 1111 0100 1010
+			2,
+		},
+		{
+			[]uint64{3, 4, 7, 13, 14, 15, 21, 25, 36, 38, 54, 62},
+			[]uint64{0x512B67A8C539A}, // 0b 0101 0001 0010 1011 0110 0111 1010 1000 1100 0101 0011 1001 1010
+			2,                         //                               0b 1001 0000 1100 0101 0011 1001 1010
+		},
+		{
+			[]uint64{2, 3, 5, 7, 11, 13, 24},
+			[]uint64{0x3EF22B6}, // 0b 0 0011 1110 1111 0010 0010 1011 0110
+			2,
+		},
+		{ // Steve_Thomas (er is geen laatste stopbit in de highbits)
+			[]uint64{4, 5, 6, 13, 22, 25},
+			[]uint64{0x3EF22B6}, // 0b 0 0011 1110 1111 0010 0010 1011 0110
+			2,
+		},
+		{ // (2016) Elias-Fano encoding
+			[]uint64{3, 4, 7, 13, 14, 15, 21, 43}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},             // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                     //
+		},
+		{ //
+			[]uint64{3, 4, 13, 15, 24, 26, 27, 29}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},              // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                      //
+		},
+		{ // sds-tutorial
+			[]uint64{8, 9, 11, 13, 16, 18, 23}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},          // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			2,                                  //
+		},
+		{ // Text Indexing
+			[]uint64{4, 13, 15, 24, 26, 27, 29}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},           // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                   //
+		},
+	} {
+		ef := New(tc.in)
+		for j, want := range tc.in {
+			if got := ef.Access(j); got != want {
+				t.Errorf("tc: %d, t: %d, got: %d, want: %d\n", i, j, got, want)
+			}
+		}
+	}
+}
+
+func TestBits(t *testing.T) {
+	for _, tc := range []struct {
+		in  []uint64
+		out []uint64
+		l   int
+	}{
+		{ // (2017) Compressed Suffix Arrays to Self-Indexes based on Partitioned Elias-Fano
+			[]uint64{5, 8, 8, 15, 32},
+			// []uint64{0x52F90C}, // 0b 101 0010 1111 1001 0000 1100 reversed???
+			[]uint64{0x182FCA}, //    0b   1 1000 0010 1111 1100 1010
+			2,
+		},
+		{
+			[]uint64{5, 8, 9, 10, 14, 32},
+			[]uint64{0xA45F4A}, // 0b 1010 0100 0101 1111 0100 1010
+			2,
+		},
+		{
+			[]uint64{3, 4, 7, 13, 14, 15, 21, 25, 36, 38, 54, 62},
+			[]uint64{0x512B67A8C539A}, // 0b 0101 0001 0010 1011 0110 0111 1010 1000 1100 0101 0011 1001 1010
+			2,                         //                               0b 1001 0000 1100 0101 0011 1001 1010
+		},
+		{
+			[]uint64{2, 3, 5, 7, 11, 13, 24},
+			[]uint64{0x3EF22B6}, // 0b 0 0011 1110 1111 0010 0010 1011 0110
+			2,
+		},
+		{ // Steve_Thomas (er is geen laatste stopbit in de highbits)
+			[]uint64{4, 5, 6, 13, 22, 25},
+			[]uint64{0x3EF22B6}, // 0b 0 0011 1110 1111 0010 0010 1011 0110
+			2,
+		},
+		{ // (2016) Elias-Fano encoding
+			[]uint64{3, 4, 7, 13, 14, 15, 21, 43}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},             // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                     //
+		},
+		{ //
+			[]uint64{3, 4, 13, 15, 24, 26, 27, 29}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},              // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                      //
+		},
+		{ // sds-tutorial
+			[]uint64{8, 9, 11, 13, 16, 18, 23}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},          // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			2,                                  //
+		},
+		{ // Text Indexing
+			[]uint64{4, 13, 15, 24, 26, 27, 29}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},           // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                   //
+		},
+	} {
+		ef := New(tc.in)
+		high, low, length, nZeros := bitSizes2(tc.in)
+		t.Errorf("Low: %d, nLowBits: %d, nHighBits: %d, lHighBits: %d, nZeros: %d\n", tc.l, low, high, length, nZeros)
+		t.Errorf("Bits: %b\n", ef.b)
+	}
+}
+
+func TestMembership(t *testing.T) {
+	array := make([]uint64, 1000)
+	for i := range array {
+		array[i] = uint64(i)
+	}
+	New(array)
+
+	// obj := New(array)
+
+	// for i, v := range array {
+	// 	if obj.Value() != v {
+	// 		t.Errorf("%d is not %d. Missing value", obj.Value(), v)
+	// 	}
+	// 	_, err := obj.Next()
+	// 	if err != nil {
+	// 		if i != len(array)-1 {
+	// 			t.Error(err)
+	// 		}
+	// 	}
+	// }
+}
+
+func TestPosition(t *testing.T) {
+	array := make([]uint64, 1000)
+	for i := range array {
+		array[i] = uint64(i)
+	}
+	obj := New(array)
+
+	for i := range array {
+		if obj.Position() != i {
+			t.Errorf("%d is not %d. Wrong position", obj.Position(), i)
+		}
+		obj.Next()
+	}
+}
+
+func TestReset(t *testing.T) {
+	array := make([]uint64, 1000)
+	for i := range array {
+		array[i] = uint64(i)
+	}
+	obj := New(array)
+
+	if obj.Position() != 0 {
+		t.Errorf("Initial position is not 0.")
+	}
+	obj.Next()
+	obj.Reset()
+	if obj.Position() != 0 {
+		t.Errorf("Position not correctly reset.")
+	}
+	if obj.Value() != 0 {
+		t.Errorf("%d is not %d. Missing value", obj.Value(), 0)
+	}
+}
+
+func TestMove(t *testing.T) {
+	array := make([]uint64, 1000)
+	for i := range array {
+		array[i] = uint64(i)
+	}
+	obj := New(array)
+
+	if obj.Position() != 0 {
+		t.Errorf("Initial position is not 0.")
+	}
+
+	for i, v := range array {
+		obj.Move(i)
+		if obj.Value() != v {
+			t.Errorf("%d is not %d. Missing value", obj.Value(), v)
+		}
+	}
+	for i := range array {
+		obj.Move(len(array) - i - 1)
+		if obj.Value() != array[len(array)-i-1] {
+			t.Errorf("%d is not %d. Missing value", obj.Value(), array[len(array)-i-1])
+		}
+	}
+}
+func TestGeneric(t *testing.T) {
+	obj := New([]uint64{0, 5, 9, 800, 1000})
+
+	if obj.Value() != 0 {
+		t.Errorf("%d is not %d. Missing value", obj.Value(), 0)
+	}
+	obj.Move(0)
+	if obj.Value() != 0 {
+		t.Errorf("%d is not %d. Missing value", obj.Value(), 0)
+	}
+	obj.Move(4)
+	if obj.Value() != 1000 {
+		t.Errorf("%d is not %d. Missing value", obj.Value(), 1000)
+	}
+	obj.Reset()
+	if obj.Value() != 0 {
+		t.Errorf("%d is not %d. Missing value", obj.Value(), 0)
+	}
+	obj.Next()
+	if obj.Value() != 5 {
+		t.Errorf("%d is not %d. Missing value", obj.Value(), 5)
+	}
+	obj.Next()
+	if obj.Value() != 9 {
+		t.Errorf("%d is not %d. Missing value", obj.Value(), 9)
+	}
+	obj.Move(1)
+	if obj.Value() != 5 {
+		t.Errorf("%d is not %d. Missing value", obj.Value(), 5)
+	}
+
+}
+
+func BenchmarkNew(b *testing.B) { // 501 ns/op  72 B/op  9 allocs/op
+	var testCases = []struct {
+		in  []uint64
+		out []uint64
+		l   int
+	}{
+		{ // (2017) Compressed Suffix Arrays to Self-Indexes based on Partitioned Elias-Fano
+			[]uint64{5, 8, 8, 15, 32},
+			// []uint64{0x52F90C}, // 0b 101 0010 1111 1001 0000 1100 reversed???
+			[]uint64{0x182FCA}, //    0b   1 1000 0010 1111 1100 1010
+			2,
+		},
+		{
+			[]uint64{5, 8, 9, 10, 14, 32},
+			[]uint64{0xA45F4A}, // 0b 1010 0100 0101 1111 0100 1010
+			2,
+		},
+		{
+			[]uint64{3, 4, 7, 13, 14, 15, 21, 25, 36, 38, 54, 62},
+			[]uint64{0x512B67A8C539A}, // 0b 0101 0001 0010 1011 0110 0111 1010 1000 1100 0101 0011 1001 1010
+			2,                         //                               0b 1001 0000 1100 0101 0011 1001 1010
+		},
+		{
+			[]uint64{2, 3, 5, 7, 11, 13, 24},
+			[]uint64{0x3EF22B6}, // 0b 0 0011 1110 1111 0010 0010 1011 0110
+			2,
+		},
+		{ // Steve_Thomas (er is geen laatste stopbit in de highbits)
+			[]uint64{4, 5, 6, 13, 22, 25},
+			[]uint64{0x3EF22B6}, // 0b 0 0011 1110 1111 0010 0010 1011 0110
+			2,
+		},
+		{ // (2016) Elias-Fano encoding
+			[]uint64{3, 4, 7, 13, 14, 15, 21, 43}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},             // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                     //
+		},
+		{ //
+			[]uint64{3, 4, 13, 15, 24, 26, 27, 29}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},              // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                      //
+		},
+		{ // sds-tutorial
+			[]uint64{8, 9, 11, 13, 16, 18, 23}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},          // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			2,                                  //
+		},
+		{ // Text Indexing
+			[]uint64{4, 13, 15, 24, 26, 27, 29}, // 0b 1110 1110 1000 1000 0111 0011 1101 1110 1111 0101 1
+			[]uint64{0x512B67A8C539A},           // 0b 0010 0010 1110 1110 0111 0111 1110 1011 1110 0011
+			3,                                   //
+		},
+	}
+
+	for i := 0; i < b.N; i++ {
+		for i := range testCases {
+			New(testCases[i].in)
+		}
+	}
+}
+
+func BenchmarkNew2(b *testing.B) { // 73.8 ns/op  8 B/op  1 allocs/op
+	arr := []uint64{3, 4, 7, 13, 14, 15, 21, 25, 36, 38, 54, 62}
+	for i := 0; i < b.N; i++ {
+		New(arr)
+	}
+}

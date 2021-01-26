@@ -1,0 +1,254 @@
+package ef
+
+import (
+	"errors"
+	"math/bits"
+
+	"github.com/gevg/pt3"
+	"github.com/willf/bitset"
+)
+
+const (
+	efInfo = `Universe: %d
+Elements: %d
+Lower_bits: %d
+Higher_bits_length: %d
+Mask: 0b%b
+Lower_bits offset: %d
+Bitvector length: %d
+`
+)
+
+// EliasFano codec structure
+type EliasFano struct {
+	// data
+	b         []uint64 // bit array
+	nLowBits  int      // number of lower bits
+	lHighBits int      // length in bits of the higher bits array
+	mask      uint64   // mask to isolate lowBits
+
+	// iterator
+	curValue uint64 // current value         // proberen te elimineren (tenzij memoization)
+	pos      int    // position              // proberen te elimineren (tenzij memoization)
+	hBitsPos int    // position in high bits // proberen te elimineren (tenzij memoization)
+}
+
+// New creates and returns an EliasFano value.
+func New(elems []uint64) EliasFano {
+	nLowBits, lHighBits, lBits := bitSizes(elems)
+
+	ef := EliasFano{
+		b:         make([]uint64, (lBits+63)>>6),
+		nLowBits:  nLowBits,
+		lHighBits: lHighBits,
+		mask:      1<<uint(nLowBits) - 1,
+	}
+
+	ef.compress(elems)
+
+	return ef
+}
+
+// numLowBits returns the bit size of the lower Elias-Fano bits of a number.
+func numLowBits(u uint64, n int) int {
+	if l := 63 - bits.LeadingZeros64(u/uint64(n)); l >= 0 {
+		return l
+	}
+	return 0
+}
+
+// numLowBits2 returns the bit size of the lower Elias-Fano bits of a number.
+func numLowBits2(u uint64, n int) int {
+	return 64 - bits.LeadingZeros64(u) - numHighBits(n)
+}
+
+// numHighBits returns the bit size of the higher Elias-Fano bits of a number.
+func numHighBits(n int) int {
+	if n&(n-1) == 0 {
+		return 63 - bits.LeadingZeros64(uint64(n))
+	}
+	return 65 - bits.LeadingZeros64(uint64(n))
+}
+
+// numHighBits2 returns the bit size of the higher Elias-Fano bits of a number.
+func numHighBits2(elems []uint64) int {
+	m := len(elems)
+	numBits := 64 - bits.LeadingZeros64(elems[m-1])
+	logm := 64 - bits.LeadingZeros64(uint64(m)) // lowBits
+
+	return numBits - logm
+}
+
+// bitSizes computes the bit size of the lower part of an Elias-Fano number
+// and the lengths of the high bits and all bits array.
+func bitSizes(elems []uint64) (int, int, int) {
+	m := len(elems)
+	nLow := bits.LeadingZeros64(uint64(m)) - bits.LeadingZeros64(elems[m-1])
+	lHigh := m + int(elems[m-1])>>uint(nLow) + 1 // Is de laatste stopbit nodig?
+
+	return nLow, lHigh, lHigh + m*nLow
+}
+
+// bitSizes computes the bit sizes of the lower and higher part of an
+// Elias-Fano number.
+func bitSizes2(elems []uint64) (int, int, int, int) {
+	m := len(elems)
+	nBits := 64 - bits.LeadingZeros64(elems[m-1])
+	nHigh := 64 - bits.LeadingZeros64(uint64(m))
+	nLow := nBits - nHigh
+	length := m + int(elems[m-1])>>uint(nLow) + 1 // Is de laatste stopbit nodig?
+
+	return nHigh, nLow, length, length - m
+}
+
+// numBits returns the bit size of a number.
+func numBits(el uint64) int {
+	return 64 - bits.LeadingZeros64(el)
+}
+
+// Compress a monotone increasing array of positive integers. Compress will
+// fail when the array is not increasing monotonically.
+func (ef *EliasFano) compress(elems []uint64) {
+	offset := ef.lHighBits
+	for i, el := range elems {
+		posHigh := (el >> uint(ef.nLowBits)) + uint64(i)
+		lowBits := el & ef.mask
+		ef.b[posHigh>>6] |= 1 << (posHigh & 63)
+		ef.b[offset>>6] |= lowBits << uint64(offset&63)
+		if bs := lowBits >> uint64(64-offset&63); bs != 0 {
+			ef.b[offset>>6+1] = bs
+		}
+		offset += ef.nLowBits
+	}
+}
+
+// Access returns the idx-th value.
+func (ef *EliasFano) Access(i int) uint64 {
+	return (ef.position(i+1)-uint64(i))<<uint(ef.nLowBits) | ef.lowBits(i)
+}
+
+// position ... in feite select
+func (ef *EliasFano) position(i int) uint64 {
+	for j := range ef.b {
+		bs := bits.OnesCount64(ef.b[j])
+		if i-bs <= 0 {
+			return uint64(j<<6) + pt3.Select(ef.b[j], uint8(i))
+		}
+		i -= bs
+	}
+	return 0 // Ik moet hier eigenlijk een fout teruggeven!!!
+}
+
+// lowBits returns the lower bits of the i-th number.
+func (ef *EliasFano) lowBits(i int) uint64 {
+	offset := uint(ef.lHighBits + i*ef.nLowBits)
+	result := (ef.b[offset>>6] >> (offset & 63)) & ef.mask
+	if offset+uint(ef.nLowBits) > 64 {
+		result |= (ef.b[offset>>6+1]) // TODO: lijn nog afwerken!
+	}
+	return result
+}
+
+// GEQ returns the first integer, equal or larger than x. heeft een slect index nodig op H.
+func (ef *EliasFano) GEQ(x uint64) uint64 {
+	// We retrieve the position p by performing select_0(hx) − hx where hx is
+	// the bucket in which x belongs to. At this point, we start to scan the
+	// elements from position p and we stop at the first one greater than x.
+	// The scan can traverse at most the size of the bucket.
+	return 0
+}
+
+// Move the internal iterator to the given position and returns a value or an error.
+func (ef *EliasFano) Move(position int) (uint64, error) {
+	if position >= ef.Size() {
+		return 0, errors.New("Out of bound")
+	}
+	if ef.pos == position {
+		return ef.Value(), nil
+	}
+	if position < ef.pos { // Waarom?
+		ef.Reset()
+	}
+	skip := position - ef.pos
+	// pos := uint(ef.hBitsPos)
+	for i := 0; i < skip; i++ {
+		// pos, _ = ef.b.NextSet(pos + 1)
+	}
+	ef.hBitsPos = position - 1
+	ef.pos = position
+	// ef.readCurrentValue()
+	return ef.Value(), nil
+}
+
+// Next moves the internal iterator to the next position and returns a value or an error.
+func (ef *EliasFano) Next() (uint64, error) {
+	ef.pos++
+	if ef.pos >= ef.Size() {
+		return 0, errors.New("End reached")
+	}
+	// ef.readCurrentValue()
+	return ef.Value(), nil
+
+}
+
+// Position return the current position of the internal iterator.
+func (ef *EliasFano) Position() int {
+	return ef.pos
+}
+
+// Reset moves the internal iterator to the beginning.
+func (ef *EliasFano) Reset() {
+	ef.hBitsPos = 0
+	ef.pos = 0
+	// ef.readCurrentValue()
+}
+
+// Info prints info regarding the EliasFano codec.
+func (ef *EliasFano) Info() {
+	// log.Printf(efInfo, ef.universe, ef.n, ef.lBits, ef.lenHighBits, ef.mask, ef.lBitsOffset, ef.lenB)
+}
+
+// Value returns the value of the current element.
+func (ef *EliasFano) Value() uint64 {
+	return ef.curValue
+}
+
+// Size returns the number of elements encoded. // Zou dit niet beter Len() zijn?
+func (ef *EliasFano) Size() int {
+	return 0 // ef.n
+}
+
+// Bitsize returns the size of the internal bitvector.
+func (ef *EliasFano) Bitsize() uint64 {
+	// return uint64(ef.b.BinaryStorageSize())
+	return 0
+}
+
+func setBits(b *bitset.BitSet, offset uint64, bits uint64, length uint64) {
+	for i := uint64(0); i < length; i++ {
+		val := bits & (1 << (length - i - 1))
+		b.SetTo(uint(offset+i+1), val > 0)
+	}
+}
+
+// Ook bulk methode voorzien waar je meerdere opeenvolgende reads in een tijd kan doen!
+// Probeer read en write te gebruiken ipv get and set!!! Vergelijk met stdlib
+
+// func (ef *EliasFano) readCurrentValue() {
+// 	pos := ef.hBitsPos
+// 	if pos > 0 {
+// 		pos++
+// 	}
+// 	pos, _ = ef.b.NextSet(pos)
+// 	ef.hBitsPos = pos
+// 	low := uint64(0)
+// 	offset := ef.lenHighBits + ef.pos*ef.nLowBits
+// 	for i := 0; i < ef.nLowBits; i++ {
+// 		if ef.b.Test(uint(offset + i + 1)) {
+// 			low++
+// 		}
+// 		low = low << 1
+// 	}
+// 	low = low >> 1
+// 	ef.curValue = uint64(((ef.hBitsPos - ef.pos - 1) << uint(ef.nLowBits)) | low)
+// }
