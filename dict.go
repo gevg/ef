@@ -18,7 +18,9 @@ type Dict struct {
 	cap        int    // number of entries that can be stored in the dictionary
 }
 
-// New constructs a dictionary with n values, all initialized to zero.
+// New constructs a dictionary with a capacity of n entries. The dictionary
+// can accept positive numbers, smaller than or equal to maxValue. The values
+// needed to be in monotonic, non-decreasing way.
 func New(cap int, maxValue uint) (Dict, error) {
 	if cap == 0 {
 		return Dict{}, errors.New("ef: dictionary does not support an empty values list")
