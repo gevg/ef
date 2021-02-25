@@ -42,6 +42,10 @@ func New(cap int, maxValue uint) (Dict, error) {
 // From constructs a dictionary from a list of values.
 func From(values []uint) (*Dict, error) {
 	l := len(values)
+	if l == 0 {
+		return nil, errors.New("ef: dictionary does not support an empty values list")
+	}
+
 	d, err := New(l, values[l-1])
 	if err != nil {
 		return nil, err
@@ -52,7 +56,7 @@ func From(values []uint) (*Dict, error) {
 
 // Append appends a value to the dictionary and returns the key. If something
 // goes wrong, Append returns -1. In that case, no value is added.
-func (d *Dict) Append(value uint) int {
+func (d *Dict) Append(value uint) int { // TODO: Return vervangen door error. Definieer een err var voor elk soort error.
 	// check values
 	if d.n != 0 && (d.cap <= d.n || value < d.pValue || d.maxValue < value) {
 		return -1
@@ -99,7 +103,7 @@ func (d *Dict) build(values []uint) (*Dict, error) {
 	for i, v := range values {
 		// check values
 		if v < vmin {
-			return nil, errors.New("ef: build requires an array that increases monotonically")
+			return nil, errors.New("ef: dictionary requires an array that increases monotonically")
 		}
 		vmin = v
 
@@ -157,46 +161,6 @@ func (d *Dict) RangeValues(start, end int) []uint {
 
 // Values reads all numbers from the dictionary.
 func (d *Dict) Values() []uint {
-	values := make([]uint, d.n)
-	var k uint
-
-	if d.sizeLValue == 0 {
-		for p, b := range d.b {
-			p64 := p << 6
-			for b != 0 {
-				values[k] = uint(p64+bits.TrailingZeros(b)) - k
-				b &= b - 1
-				k++
-			}
-		}
-		return values
-	}
-
-	lValFilter, offset, off63 := d.sizeH, d.sizeH, d.sizeH&63
-
-	for p, b := range d.b[:(d.sizeH+63)>>6] {
-		b &= 1<<lValFilter - 1
-		p64 := p << 6
-		for b != 0 {
-			hvalue := uint(p64+bits.TrailingZeros(b)) - k
-			lvalue := d.b[offset>>6] >> off63 & d.lMask
-			if off63+d.sizeLValue > 64 {
-				lvalue |= d.b[offset>>6+1] << (64 - off63) & d.lMask
-			}
-			values[k] = hvalue<<d.sizeLValue | lvalue
-
-			b &= b - 1
-			offset += d.sizeLValue
-			off63 = offset & 63
-			k++
-		}
-		lValFilter -= 64
-	}
-	return values
-}
-
-// Values2 reads all numbers from the dictionary.
-func (d *Dict) Values2() []uint {
 	values := make([]uint, d.n)
 	var k int
 
